@@ -1,14 +1,18 @@
 #!/bin/env python
 
 from simplejson.errors import JSONDecodeError
-
+import time
 import requests
 
-
-page_size=20
+KEYWORD="testalternatecommunications"
+page_size=40
 public_timeline_path=f"/api/v1/timelines/public?limit={page_size}"
 
+public_tags_path=f"/api/v1/timelines/tag/"
+
 hosts = []
+failed_hosts = [] 
+
 
 def log_error(msg: str):
     print(f"[ERROR] {msg}")
@@ -18,6 +22,7 @@ def fetch_public_timeline(host: str):
     resp = requests.get(f"https://{host}/{public_timeline_path}")
     if resp.status_code != 200:
         log_error(f"Failed federated posts at: {host} {resp.status_code}")
+        failed_hosts.append(failed_hosts)
         return None
     
     try:
@@ -62,7 +67,7 @@ def seed_hosts(seed_host: str):
 
     for host in hosts.copy():
         print(f"Seeding {host}")
-        if host in visited:
+        if host in visited or host in failed_hosts:
             continue
 
         visited.append(host)
@@ -73,7 +78,41 @@ def seed_hosts(seed_host: str):
         for h in found_hosts:
             hosts.append(h) if h not in hosts else None
 
-seed_hosts("botsin.space")
 
-print(f"Seeded {len(hosts)} domains")
-print(hosts)
+def message_processor(host: str) -> bool:
+    print(f"Trying host: {host}")
+    global KEYWORD
+    global hosts
+    resp = requests.get(f"https://{host}/{public_tags_path}/{KEYWORD}")
+    if resp.status_code != 200:
+        log_error(f"Failed to pull tag search {resp.status_code}: {resp.content} ")
+        failed_hosts.append(hosts.pop(hosts.index(host)))
+        return False
+    j = None
+    
+    try:
+        j = resp.json()
+    except JSONDecodeError as exc:
+        log_error(f"Failed to parse json from API[{resp.status_code}]: {resp.content}")
+        failed_hosts.append(hosts.pop(hosts.index(host)))
+        return False
+    
+    print(f"Found {len(j)} messages to handle")
+    if len(j) > 0:
+        last_msg = j[-1]
+        print(f"Most recent message was: {last_msg['content']}")
+    print("Sleeping...")
+    time.sleep(10)
+    return True
+
+print(f"\n\nLooking for keyword tag: {KEYWORD}")
+
+while True:
+    seed_hosts("botsin.space")
+
+    print(f"Seeded {len(hosts)} domains")
+    print(hosts)
+
+    if True not in [message_processor(host) for host in hosts]:
+        log_error("No attempt at seaching for tags succeeded, bailing...")
+        exit(1)
